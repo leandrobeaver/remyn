@@ -26,14 +26,54 @@ palavra=tradução. Pra habilidades práticas, prefira decisões, diferenças e 
 Regras de escrita: português brasileiro simples. Nunca use travessão em nenhum texto.
 Cartão tipo "cloze" marca a lacuna com {{...}} na frente e traz a resposta no verso.
 
-Responda SOMENTE com JSON válido, sem markdown, neste formato exato:
-{
-  "conceitos": [{"nome": "...", "descricao": "1 frase", "prioridade": "critical|high|medium|low"}],
-  "cartoes": [{"conceito": "nome do conceito", "tipo": "basic|cloze|production", "frente": "...", "verso": "...", "contexto": "de onde veio ou quando usar", "justificativa": "por que passou no filtro, 1 frase"}],
-  "rejeitados": [{"ideia": "...", "motivo": "..."}]
-}
-Máximo de 8 cartões e 12 conceitos por análise. Se o material não render nada de alto valor,
-devolva "cartoes" vazio e explique nos rejeitados.`;
+Entregue o resultado pela ferramenta "entregar_resultado". Máximo de 8 cartões e 12 conceitos
+por análise. Se o material não render nada de alto valor, devolva "cartoes" vazio e explique
+nos rejeitados.`;
+
+const RESULT_SCHEMA = {
+  type: "object",
+  properties: {
+    conceitos: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          nome: { type: "string" },
+          descricao: { type: "string", description: "1 frase" },
+          prioridade: { type: "string", enum: ["critical", "high", "medium", "low"] },
+        },
+        required: ["nome", "descricao", "prioridade"],
+      },
+    },
+    cartoes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          conceito: { type: "string", description: "nome do conceito dono do cartão" },
+          tipo: { type: "string", enum: ["basic", "cloze", "production"] },
+          frente: { type: "string" },
+          verso: { type: "string" },
+          contexto: { type: "string", description: "de onde veio ou quando usar" },
+          justificativa: { type: "string", description: "por que passou no filtro, 1 frase" },
+        },
+        required: ["conceito", "tipo", "frente", "verso", "contexto", "justificativa"],
+      },
+    },
+    rejeitados: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          ideia: { type: "string" },
+          motivo: { type: "string" },
+        },
+        required: ["ideia", "motivo"],
+      },
+    },
+  },
+  required: ["conceitos", "cartoes", "rejeitados"],
+} as const;
 
 export async function generateCandidates(material: string, areaName: string): Promise<GenerationResult> {
   const provider = getProvider();
@@ -43,16 +83,12 @@ export async function generateCandidates(material: string, areaName: string): Pr
 
   const prompt = `Área de estudo: ${areaName}\n\nMaterial fornecido pelo usuário:\n"""\n${material.slice(0, 24000)}\n"""\n\nAnalise e proponha os itens de aprendizagem de alto valor.`;
 
-  const raw = await provider.complete({ system: SYSTEM, prompt, maxTokens: 4000 });
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  let parsed: GenerationResult;
-  try {
-    parsed = JSON.parse(cleaned) as GenerationResult;
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("A IA não devolveu JSON válido. Tente de novo.");
-    parsed = JSON.parse(match[0]) as GenerationResult;
-  }
+  const parsed = await provider.completeJson<GenerationResult>({
+    system: SYSTEM,
+    prompt,
+    schema: RESULT_SCHEMA as unknown as Record<string, unknown>,
+    maxTokens: 8000,
+  });
 
   parsed.conceitos = (parsed.conceitos ?? []).slice(0, 12);
   parsed.cartoes = (parsed.cartoes ?? []).slice(0, 8);
